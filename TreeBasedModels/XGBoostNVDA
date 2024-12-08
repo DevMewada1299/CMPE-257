@@ -1,0 +1,88 @@
+import pandas as pd
+import numpy as np
+import torch.nn as nn
+import matplotlib.pyplot as plt
+import yfinance as yf
+import matplotlib.pyplot as plt
+import torch.nn
+from sklearn.preprocessing import MinMaxScaler
+import xgboost as xgb
+from sklearn.model_selection import GridSearchCV
+
+df = yf.download('NVDA', start='2024-01-01', end='2024-12-01')
+
+df = df['Close']
+
+# Example: Create lagged features
+df['Lag1'] = df['NVDA'].shift(1)
+df['Lag2'] = df['NVDA'].shift(2)
+df['Lag3'] = df['NVDA'].shift(3)
+df['Lag4'] = df['NVDA'].shift(4)
+df.dropna(inplace=True)  # Remove rows with NaN values
+
+from sklearn.model_selection import train_test_split
+
+X = df[['Lag1', 'Lag2', 'Lag3', 'Lag4']]  # Features
+y = df['NVDA']           # Target variable
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+
+param_grid = {
+    'n_estimators': [50, 100, 200],        # Number of trees
+    'max_depth': [3, 5, 7],               # Maximum depth of trees
+    'learning_rate': [0.01, 0.1, 0.2],    # Learning rate (eta)
+    'min_child_weight': [1, 3, 5],        # Minimum sum of weights of child nodes
+    'subsample': [0.8, 1],                # Fraction of samples used for training each tree
+    'colsample_bytree': [0.8, 1]          # Fraction of features used per tree
+}
+
+model = xgb.XGBRegressor(objective='reg:squarederror', random_state=42)
+
+grid_search = GridSearchCV(
+    estimator=model,
+    param_grid=param_grid,
+    scoring='neg_mean_squared_error',  # Use negative MSE as the scoring metric
+    cv=3,                              # Number of cross-validation folds
+    verbose=1                          # Print progress during tuning
+)
+
+grid_search.fit(X_train, y_train)
+
+print("Best Parameters:", grid_search.best_params_)
+
+best_model = grid_search.best_estimator_
+
+y_pred = best_model.predict(X_test)
+
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+mae = mean_absolute_error(y_test, y_pred)
+rmse = mean_squared_error(y_test, y_pred, squared=False)
+r2 = r2_score(y_test, y_pred)
+
+print(f"MAE: {mae}, RMSE: {rmse}, R²: {r2}")
+
+last_row = df.iloc[-1]  # Get the most recent row
+future_data = {
+    'Lag1': last_row['NVDA'], 
+    'Lag2': last_row['Lag1'],
+    'Lag3': last_row['Lag2'],
+    'Lag4': last_row['Lag3'],
+}
+
+
+future_prices = []
+for _ in range(20):
+    # Convert to DataFrame for prediction
+    input_data = pd.DataFrame([future_data])
+
+    # Predict next price
+    next_price = best_model.predict(input_data)[0]
+    future_prices.append(next_price)
+
+    # Update lagged features for next iteration
+    future_data['Lag4'] = future_data['Lag3']
+    future_data['Lag3'] = future_data['Lag2']
+    future_data['Lag2'] = future_data['Lag1']
+    future_data['Lag1'] = next_price
+
+print("Predicted Prices for Next 5 Days:", future_prices)
